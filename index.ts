@@ -25,9 +25,23 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Key } from "@mariozechner/pi-tui";
 import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./utils.js";
 
-// Tools
-const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
-const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write"];
+// Builtins permitted in plan mode (read-only, no file modification)
+const PLAN_SAFE_BUILTINS = new Set(["read", "bash", "grep", "find", "ls"]);
+
+// Non-builtin (extension) tools explicitly permitted in plan mode.
+// MCP tools are intentionally excluded — they can execute shell commands or
+// mutate system state. Add only known read-only extension tools here.
+const PLAN_SAFE_EXTENSION_TOOLS = new Set([
+	// pi-web-access
+	"web_search",
+	"code_search",
+	"fetch_content",
+	"get_search_content",
+	// pi-pretty
+	"multi_grep",
+	// rpiv-ask-user-question
+	"ask_user_question",
+]);
 
 // Type guard for assistant messages
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -80,6 +94,19 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		}
 	}
 
+	function getPlanModeTools(): string[] {
+		return pi.getAllTools()
+			.filter(t => {
+				if (t.sourceInfo.source === "builtin") return PLAN_SAFE_BUILTINS.has(t.name);
+				return PLAN_SAFE_EXTENSION_TOOLS.has(t.name);
+			})
+			.map(t => t.name);
+	}
+
+	function getNormalModeTools(): string[] {
+		return pi.getAllTools().map(t => t.name);
+	}
+
 	function enterPlanMode(ctx: ExtensionContext): void {
 		if (planModeEnabled) {
 			ctx.ui.notify("Already in plan mode.", "info");
@@ -88,8 +115,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		planModeEnabled = true;
 		// Entering plan mode: abandon any active execution plan
 		todoItems = [];
-		pi.setActiveTools(PLAN_MODE_TOOLS);
-		ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
+		const planTools = getPlanModeTools();
+		pi.setActiveTools(planTools);
+		ctx.ui.notify(`Plan mode enabled. Tools: ${planTools.join(", ")}`);
 		updateStatus(ctx);
 	}
 
@@ -100,7 +128,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		}
 		planModeEnabled = false;
 		// Entering execution mode: keep any existing plan
-		pi.setActiveTools(NORMAL_MODE_TOOLS);
+		pi.setActiveTools(getNormalModeTools());
 		ctx.ui.notify("Execution mode. Full access restored.");
 		updateStatus(ctx);
 	}
@@ -184,8 +212,16 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		};
 	});
 
-	// Inject plan/execution context before agent starts
+	// Inject plan/execution context before agent starts.
+	// Tool list is re-evaluated here on every turn to pick up MCP tools that
+	// register asynchronously after session_start.
 	pi.on("before_agent_start", async () => {
+		if (planModeEnabled) {
+			pi.setActiveTools(getPlanModeTools());
+		} else {
+			pi.setActiveTools(getNormalModeTools());
+		}
+
 		if (planModeEnabled) {
 			return {
 				message: {
@@ -194,12 +230,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 You are in plan mode - a read-only exploration mode for safe code analysis.
 
 Restrictions:
-- You can only use: read, bash, grep, find, ls, questionnaire
+- You can only use: read, bash, grep, find, ls, and permitted read-only extension tools (e.g. web_search, ask_user_question)
 - You CANNOT use: edit, write (file modifications are disabled)
-- Bash is restricted to an allowlist of read-only commands
+- Bash is restricted to an allowlist of read-only commands; unsafe commands are hard-blocked
+- MCP tools and unknown extension tools are not available in plan mode
 
-Ask clarifying questions using the questionnaire tool.
-Use brave-search skill via bash for web research.
+Ask clarifying questions using the ask_user_question tool.
+Use web_search or fetch_content for web research.
 
 Create a detailed numbered plan under a "Plan:" header:
 
@@ -292,7 +329,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			pi.setActiveTools(getNormalModeTools());
 			updateStatus(ctx);
 
 			const execMessage =
@@ -359,9 +396,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		}
 
 		if (planModeEnabled) {
-			pi.setActiveTools(PLAN_MODE_TOOLS);
+			pi.setActiveTools(getPlanModeTools());
 		} else {
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			pi.setActiveTools(getNormalModeTools());
 		}
 		updateStatus(ctx);
 	});
