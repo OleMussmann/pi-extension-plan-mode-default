@@ -308,7 +308,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			}
 		}
 
-		// Show plan steps and prompt for next action
+		// Show plan steps
 		if (todoItems.length > 0) {
 			const todoListText = todoItems.map((t, i) => `${i + 1}. ☐ ${t.text}`).join("\n");
 			pi.sendMessage(
@@ -319,32 +319,6 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				},
 				{ triggerTurn: false },
 			);
-		}
-
-		const choice = await ctx.ui.select("Plan mode - what next?", [
-			todoItems.length > 0 ? "Execute the plan (track progress)" : "Execute the plan",
-			"Stay in plan mode",
-			"Refine the plan",
-		]);
-
-		if (choice?.startsWith("Execute")) {
-			planModeEnabled = false;
-			pi.setActiveTools(getNormalModeTools());
-			updateStatus(ctx);
-
-			const execMessage =
-				todoItems.length > 0
-					? `Execute the plan. Start with: ${todoItems[0].text}`
-					: "Execute the plan you just created.";
-			pi.sendMessage(
-				{ customType: "plan-mode-execute", content: execMessage, display: true },
-				{ triggerTurn: true },
-			);
-		} else if (choice === "Refine the plan") {
-			const refinement = await ctx.ui.editor("Refine the plan:", "");
-			if (refinement?.trim()) {
-				pi.sendUserMessage(refinement.trim());
-			}
 		}
 	});
 
