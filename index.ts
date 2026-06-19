@@ -177,14 +177,16 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
 	// Block destructive bash commands in plan mode
 	pi.on("tool_call", async (event) => {
-		if (!planModeEnabled || event.toolName !== "bash") return;
+		if (!planModeEnabled) return;
 
-		const command = event.input.command as string;
-		if (!isSafeCommand(command)) {
-			return {
-				block: true,
-				reason: `Plan mode: command blocked (not allowlisted). Use /exec to switch to execution mode first.\nCommand: ${command}`,
-			};
+		if (event.toolName === "bash") {
+			const command = event.input.command as string;
+			if (!isSafeCommand(command)) {
+				return {
+					block: true,
+					reason: `Plan mode: command blocked (not allowlisted). Use /exec to switch to execution mode first.\nCommand: ${command}`,
+				};
+			}
 		}
 	});
 
@@ -255,7 +257,10 @@ Plan:
 2. Second step description
 ...
 
-Do NOT attempt to make changes - just describe what you would do.`, 
+Do NOT attempt to make changes - just describe what you would do.
+After presenting your numbered plan, STOP immediately.
+Do not call any more tools. Do not explore further.
+Wait for the user to switch to execution mode.`,
 					display: false,
 				},
 			};
@@ -282,7 +287,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 	// Track progress after each turn
 	pi.on("turn_end", async (event, ctx) => {
-		if (planModeEnabled || todoItems.length === 0) return;
+		if (planModeEnabled) return;
+		if (todoItems.length === 0) return;
 		if (!isAssistantMessage(event.message)) return;
 
 		const text = getTextContent(event.message);
@@ -318,13 +324,13 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			}
 		}
 
-		// Show plan steps
+		// Show plan steps and prompt to switch to exec mode
 		if (todoItems.length > 0) {
 			const todoListText = todoItems.map((t, i) => `${i + 1}. ☐ ${t.text}`).join("\n");
 			pi.sendMessage(
 				{
 					customType: "plan-todo-list",
-					content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
+					content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}\n\nSwitch to execution mode with \`/exec\` to begin.`,
 					display: true,
 				},
 				{ triggerTurn: false },
