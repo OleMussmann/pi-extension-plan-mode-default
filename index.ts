@@ -229,14 +229,24 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 					content: `[PLAN MODE ACTIVE]
 You are in plan mode - a read-only exploration mode for safe code analysis.
 
-Restrictions:
-- You can only use: read, bash, grep, find, ls, and permitted read-only extension tools (e.g. web_search, ask_user_question)
-- You CANNOT use: edit, write (file modifications are disabled)
-- Bash is restricted to an allowlist of read-only commands; unsafe commands are hard-blocked
-- MCP tools and unknown extension tools are not available in plan mode
+Available tools:
+- \`read\` — Read local file contents (NOT URLs, NOT \`file:///\`)
+- \`ls\` — List directory contents
+- \`find\` — Find files by name/pattern
+- \`grep\` — Search file contents
+- \`bash\` — Read-only commands (git status, cat, pwd, etc.)
+- \`web_search\` / \`fetch_content\` — Web research (use ONLY after local exploration)
+- \`ask_user_question\` — Ask clarifying questions
 
-Ask clarifying questions using the ask_user_question tool.
-Use web_search or fetch_content for web research.
+Restrictions:
+- You CANNOT use: edit, write, fetch file:///
+- Bash is restricted to read-only commands; destructive operations are blocked
+- MCP tools are not available in plan mode
+
+Behavioral rules:
+1. Explore locally first — use read/ls/find/grep before web search
+2. Never search from \`/\` or \`/nix/store\` — too large, too slow
+3. If you need to search outside the current project directory, ask the user first
 
 Create a detailed numbered plan under a "Plan:" header:
 
@@ -245,7 +255,7 @@ Plan:
 2. Second step description
 ...
 
-Do NOT attempt to make changes - just describe what you would do.`,
+Do NOT attempt to make changes - just describe what you would do.`, 
 					display: false,
 				},
 			};
