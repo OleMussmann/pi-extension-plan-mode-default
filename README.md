@@ -124,6 +124,44 @@ Interrupted plans are automatically resumed when you restart pi. If a plan was i
 - **System**: `sudo`, `kill`, `reboot`, `shutdown`
 - **Editors**: `vim`, `nano`, `emacs`, `code`
 
+## Extension Compatibility
+
+This extension filters tools by `sourceInfo.source` to distinguish builtins from extension-registered tools. **Extensions that rewrite builtin tools** (e.g., [pi-pretty](https://github.com/heyhuynhgiabuu/pi-pretty)) register replacements via `pi.registerTool()` with `source === "extension"`, which plan mode's allowlist does not recognize.
+
+**Result:** Tools like `read`, `bash`, `ls`, `find`, `grep` disappear in plan mode when a rewriting extension is active.
+
+### Workaround
+
+Use pi-pretty's `PRETTY_DISABLE_TOOLS` env var to skip rewriting the tools plan mode manages:
+
+```bash
+PRETTY_DISABLE_TOOLS=read,bash,ls,find,grep pi
+```
+
+Or disable pi-pretty entirely when using plan mode:
+
+```bash
+# Unload pi-pretty temporarily
+pi --no-extension pi-pretty
+```
+
+### Why this happens
+
+Plan mode's `getPlanModeTools()` checks:
+
+```typescript
+if (t.sourceInfo.source === "builtin") return PLAN_SAFE_BUILTINS.has(t.name);
+return PLAN_SAFE_EXTENSION_TOOLS.has(t.name);
+```
+
+pi-pretty's tools have `source === "extension"`, so they fall into the extension path and get filtered out since `read`, `bash`, etc. aren't in `PLAN_SAFE_EXTENSION_TOOLS`.
+
+### For extension authors
+
+If your extension rewrites builtin tool names, either:
+- Use `PRETTY_DISABLE_TOOLS` equivalent to let users opt out
+- Or open an issue requesting name-based allowlisting
+
 ## Acknowledgements
 
 This project is based on the [Plan Mode Extension](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples/extensions/plan-mode)
