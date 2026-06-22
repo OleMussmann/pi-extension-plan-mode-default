@@ -177,28 +177,30 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
 	// Block destructive bash commands in plan mode
 	pi.on("tool_call", async (event) => {
-		if (!planModeEnabled) return;
+		if (!planModeEnabled || event.toolName !== "bash") return;
 
-		if (event.toolName === "bash") {
-			const command = event.input.command as string;
-			if (!isSafeCommand(command)) {
-				return {
-					block: true,
-					reason: `Plan mode: command blocked (not allowlisted). Use /exec to switch to execution mode first.\nCommand: ${command}`,
-				};
-			}
+		const command = event.input.command as string;
+		if (!isSafeCommand(command)) {
+			return {
+				block: true,
+				reason: `Plan mode: command blocked (not allowlisted). Use /exec to switch to execution mode first.\nCommand: ${command}`,
+			};
 		}
 	});
 
 	// Filter out stale plan mode context when not in plan mode
 	pi.on("context", async (event) => {
-		if (planModeEnabled) return;
-
 		return {
 			messages: event.messages.filter((m) => {
 				const msg = m as AgentMessage & { customType?: string };
+				// UI-only messages — never feed to LLM
+				if (msg.customType === "plan-todo-list") return false;
+				if (msg.customType === "plan-complete") return false;
+				if (msg.customType === "plan-mode-execute") return false;
+				if (msg.customType === "plan-execution-context") return false;
 				if (msg.customType === "plan-mode-context") return false;
-				if (msg.role !== "user") return true;
+				// When not in plan mode, strip stale plan-mode prompts from user messages
+				if (planModeEnabled || msg.role !== "user") return true;
 
 				const content = msg.content;
 				if (typeof content === "string") {
@@ -222,6 +224,20 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			pi.setActiveTools(getPlanModeTools());
 		} else {
 			pi.setActiveTools(getNormalModeTools());
+		}
+
+		if (planModeEnabled && todoItems.length > 0) {
+			return {
+				message: {
+					customType: "plan-mode-context",
+					content: `[PLAN MODE ACTIVE]
+You are in plan mode. A plan has already been created and is displayed above.
+
+Do NOT respond. Do NOT create a new plan.
+Wait for the user to switch to execution mode with /exec.`,
+					display: false,
+				},
+			};
 		}
 
 		if (planModeEnabled) {
@@ -257,10 +273,7 @@ Plan:
 2. Second step description
 ...
 
-Do NOT attempt to make changes - just describe what you would do.
-After presenting your numbered plan, STOP immediately.
-Do not call any more tools. Do not explore further.
-Wait for the user to switch to execution mode.`,
+Do NOT attempt to make changes - just describe what you would do.`,
 					display: false,
 				},
 			};
@@ -287,8 +300,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 	// Track progress after each turn
 	pi.on("turn_end", async (event, ctx) => {
-		if (planModeEnabled) return;
-		if (todoItems.length === 0) return;
+		if (planModeEnabled || todoItems.length === 0) return;
 		if (!isAssistantMessage(event.message)) return;
 
 		const text = getTextContent(event.message);
@@ -317,20 +329,21 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 		// Extract todos from last assistant message
 		const lastAssistant = [...event.messages].reverse().find(isAssistantMessage);
+		let extracted: TodoItem[] = [];
 		if (lastAssistant) {
-			const extracted = extractTodoItems(getTextContent(lastAssistant));
+			extracted = extractTodoItems(getTextContent(lastAssistant));
 			if (extracted.length > 0) {
 				todoItems = extracted;
 			}
 		}
 
-		// Show plan steps and prompt to switch to exec mode
-		if (todoItems.length > 0) {
+		// Show plan steps only when the current assistant message created a new plan
+		if (extracted.length > 0) {
 			const todoListText = todoItems.map((t, i) => `${i + 1}. ☐ ${t.text}`).join("\n");
 			pi.sendMessage(
 				{
 					customType: "plan-todo-list",
-					content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}\n\nSwitch to execution mode with \`/exec\` to begin.`,
+					content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
 					display: true,
 				},
 				{ triggerTurn: false },
