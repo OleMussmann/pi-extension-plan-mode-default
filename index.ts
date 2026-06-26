@@ -36,6 +36,7 @@ const PLAN_SAFE_BUILTINS = new Set(["read", "bash", "grep", "find", "ls"]);
 
 interface PlanItem {
 	step: number;
+	name?: string;
 	text: string;
 	completed: boolean;
 	priority?: "low" | "medium" | "high";
@@ -51,7 +52,8 @@ interface PlanDetails {
 const PlanItemParams = Type.Object({
 	action: StringEnum(["add", "update", "toggle", "remove", "clear", "list"] as const),
 	step: Type.Optional(Type.Number({ description: "Step number for update/toggle/remove" })),
-	text: Type.Optional(Type.String({ description: "Step description for add/update" })),
+	name: Type.Optional(Type.String({ description: "Short display name for the plan item (shown in widget)" })),
+	text: Type.Optional(Type.String({ description: "Full step description for add/update" })),
 	priority: Type.Optional(StringEnum(["low", "medium", "high"] as const)),
 });
 
@@ -77,13 +79,14 @@ export default function planModeDefaultExtension(pi: ExtensionAPI): void {
 
 		if (execModeEnabled && planItems.length > 0) {
 			const lines = planItems.map((item) => {
+				const displayName = item.name ?? item.text.split("\n")[0];
 				if (item.completed) {
 					return (
 						ctx.ui.theme.fg("success", "☑ ") +
-						ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
+						ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(displayName))
 					);
 				}
-				return `${ctx.ui.theme.fg("muted", "☐ ")}${item.text}`;
+				return `${ctx.ui.theme.fg("muted", "☐ ")}${displayName}`;
 			});
 			ctx.ui.setWidget("plan-items", lines);
 		} else {
@@ -183,7 +186,13 @@ export default function planModeDefaultExtension(pi: ExtensionAPI): void {
 			}
 			const completed = planItems.filter((t) => t.completed).length;
 			const list = planItems
-				.map((item, i) => `${i + 1}. ${item.completed ? "✓" : "○"} ${item.text}`)
+				.map((item, i) => {
+					const name = item.name ?? item.text.split("\n")[0];
+					const detail = item.name ? item.text : "";
+					let line = `${i + 1}. ${item.completed ? "✓" : "○"} ${name}`;
+					if (detail) line += `\n   → ${detail}`;
+					return line;
+				})
 				.join("\n");
 			ctx.ui.notify(`Plan (${completed}/${planItems.length}):\n${list}`, "info");
 		},
@@ -260,7 +269,7 @@ When creating a plan:
 
 		if (execModeEnabled && planItems.length > 0) {
 			const remaining = planItems.filter((t) => !t.completed);
-			const todoList = remaining.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const todoList = remaining.map((t) => `${t.step}. ${t.name ?? t.text.split("\n")[0]}`).join("\n");
 			return {
 				message: {
 					customType: "exec-mode-context",
@@ -281,18 +290,23 @@ Execute each step in order. Use the plan_item tool to mark steps complete.`,
 	pi.registerTool({
 		name: "plan_item",
 		label: "Plan Item",
-		description: "Manage the implementation plan. Actions: add, update, toggle, remove, clear, list",
+		description: "Manage the implementation plan. Actions: add, update, toggle, remove, clear, list. Use 'name' for short display labels.",
 		parameters: PlanItemParams,
 		promptSnippet: "Use plan_item to manage implementation plan steps",
 		promptGuidelines: [
 			"Use plan_item tool with action 'add' to add each step of your plan.",
+			"Use the 'name' parameter for a short display label (shown in widget). Keep it concise.",
+			"Use the 'text' parameter for the full implementation details.",
 			"Use plan_item tool with action 'toggle' to mark a step as completed or uncompleted.",
 		],
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			switch (params.action) {
 				case "list": {
 					const text = planItems.length
-						? planItems.map((t) => `[${t.completed ? "x" : " "}] ${t.step}. ${t.text}`).join("\n")
+						? planItems.map((t) => {
+							const display = t.name ?? t.text.split("\n")[0];
+							return `[${t.completed ? "x" : " "}] ${t.step}. ${display}`;
+						}).join("\n")
 						: "No plan items";
 					return {
 						content: [{ type: "text", text }],
@@ -309,6 +323,7 @@ Execute each step in order. Use the plan_item tool to mark steps complete.`,
 					}
 					const item: PlanItem = {
 						step: nextStep++,
+						name: params.name,
 						text: params.text,
 						completed: false,
 						priority: params.priority,
@@ -335,6 +350,7 @@ Execute each step in order. Use the plan_item tool to mark steps complete.`,
 						};
 					}
 					if (params.text) item.text = params.text;
+					if (params.name) item.name = params.name;
 					if (params.priority) item.priority = params.priority;
 					return {
 						content: [{ type: "text", text: `Updated step #${item.step}: ${item.text}` }],
