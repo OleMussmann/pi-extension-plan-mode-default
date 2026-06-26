@@ -1,115 +1,109 @@
-# Plan Mode Extension for pi-coding-agent
+# Plan Mode Default Extension for pi
 
-Read-only exploration mode for safe code analysis. Inspired by Claude Code's plan mode.
+Plan mode by default for interactive sessions. Structured plan management via `plan_item` tool.
 
 ## Features
 
-- **Read-only tools**: Restricts available tools to `read`, `bash`, `grep`, `find`, `ls`, `questionnaire`
-- **Bash allowlist**: Only read-only bash commands are allowed (e.g., `cat`, `grep`, `git status`)
-- **Plan extraction**: Extracts numbered steps from `Plan:` sections in agent responses
-- **Progress tracking**: Widget shows completion status during execution
-- **[DONE:n] markers**: Explicit step completion tracking by the agent
-- **Session persistence**: State survives session resume
+- **Plan mode default**: Interactive sessions start in read-only exploration mode
+- **Hybrid tool allowlist**: Safe builtins restricted, extension/MCP tools auto-allowed
+- **Structured plan management**: `plan_item` tool for add/update/toggle/remove/clear/list
+- **Session persistence**: Plan survives session resume via `appendEntry`
+- **Keyboard shortcut**: `Ctrl+Alt+P` to toggle plan/exec mode
+- **CLI flags**: `--plan` and `--exec` to override defaults
 
 ## Installation
 
-### Option 1: Global (all projects)
-
 ```bash
-# Clone or copy this extension into your extensions directory
-git clone git@github.com:user/repo.git ~/.pi/agent/extensions/plan-mode-default
-```
-
-### Option 2: Project-local
-
-```bash
-git clone git@github.com:user/repo.git .pi/extensions/plan-mode-default
-```
-
-### Option 3: Via `pi install`
-
-```bash
-pi install git:github.com/user/repo
-```
-
-Then add to your `settings.json`:
-
-```json
-{
-  "packages": [
-    "git:github.com/user/repo"
-  ]
-}
-```
-
-### Option 4: Load directly
-
-```bash
-pi --extension ./path/to/plan-mode-default/index.ts
+pi install git:github.com/OleMussmann/pi-extension-plan-mode-default
 ```
 
 ## Usage
 
-Plan mode is **active by default** when pi starts. All sessions begin in read-only exploration mode.
+### Modes
 
-1. Ask the agent to analyze code and create a plan
-2. The agent should output a numbered plan under a `Plan:` header:
+| Mode | Description | Tools |
+|------|-------------|-------|
+| **Plan mode** | Read-only exploration | `read`, `bash` (safe only), `grep`, `find`, `ls` + all extension tools |
+| **Exec mode** | Full tool access | All tools |
 
-```markdown
-Plan:
-1. First step description
-2. Second step description
-3. Third step description
+### Switching modes
+
+| Method | Action |
+|--------|--------|
+| `/plan` | Enter plan mode |
+| `/exec` | Enter exec mode |
+| `Ctrl+Alt+P` | Toggle between modes |
+| `pi --plan` | Start in plan mode |
+| `pi --exec` | Start in exec mode |
+
+### Creating a plan
+
+1. Type `/create-plan` or ask the agent to create a plan
+2. The agent uses `plan_item` tool to add steps:
+
+```
+plan_item(action: "add", text: "Step description", priority: "high")
 ```
 
-3. Choose "Execute the plan" when prompted, or switch to execution mode manually with `/exec`
-4. During execution, the agent marks steps complete with `[DONE:n]` tags
-5. Progress widget shows completion status in the footer
+3. Switch to exec mode with `/exec` or `Ctrl+Alt+P`
+4. Agent executes steps and marks them complete:
 
-### Starting in execution mode
-
-Use the `--exec` CLI flag to start pi with full tool access:
-
-```bash
-pi --exec
+```
+plan_item(action: "toggle", step: 1)
 ```
 
-You can also switch between modes at any time with `/plan`, `/exec`, or `Ctrl+Alt+M`.
-
-### Resuming sessions
-
-Interrupted plans are automatically resumed when you restart pi. If a plan was in progress, the extension restores the remaining steps and re-enters execution mode.
-
-## Commands
+### Managing plans
 
 | Command | Description |
 |---------|-------------|
-| `/plan` | Enter plan mode (read-only exploration) |
-| `/exec` | Enter execution mode (full tool access) |
-| `/todos` | Show current plan progress |
+| `/plan-status` | Show current plan progress |
+| `/create-plan` | Trigger agent to create a plan |
 
-## Keyboard Shortcut
+### plan_item tool
 
-| Shortcut | Description |
-|----------|-------------|
-| `Ctrl+Alt+M` | Toggle between plan and execution mode |
+| Action | Description |
+|--------|-------------|
+| `add` | Add a new step (requires `text`, optional `priority`) |
+| `update` | Update step text or priority (requires `step`) |
+| `toggle` | Mark step complete/uncomplete (requires `step`) |
+| `remove` | Delete a step (requires `step`) |
+| `clear` | Delete all steps |
+| `list` | Show all steps |
 
 ## How It Works
 
-### Plan Mode (Read-Only)
-- Only read-only tools available: `read`, `bash`, `grep`, `find`, `ls`, `questionnaire`
-- Bash commands filtered through allowlist — destructive operations are blocked
-- Agent creates a plan without making changes to files
+### Plan mode restrictions
 
-### Execution Mode
-- Full tool access restored (`read`, `bash`, `edit`, `write`)
-- Agent executes steps in order
-- `[DONE:n]` markers track completion
-- Widget shows progress in the footer
+- **edit/write tools**: Blocked entirely
+- **Bash**: Restricted to safe read-only commands via allowlist
+- **Extension tools**: All allowed (user explicitly installed them)
+
+### Hybrid allowlist
+
+```typescript
+const PLAN_SAFE_BUILTINS = new Set(["read", "bash", "grep", "find", "ls"]);
+
+function getPlanModeTools(): string[] {
+    return pi.getAllTools()
+        .filter((t) => {
+            // Allow all extension/MCP tools
+            if (t.sourceInfo.source !== "builtin") return true;
+            // For builtins, only allow safe read-only commands
+            return PLAN_SAFE_BUILTINS.has(t.name);
+        })
+        .map((t) => t.name);
+}
+```
+
+This means:
+- New extension/MCP tools auto-appear in plan mode
+- Builtin tools restricted to safe set
+- No need to maintain extension tool allowlist
 
 ## Command Allowlist
 
-### Safe commands (allowed):
+### Safe commands (allowed)
+
 - **File inspection**: `cat`, `head`, `tail`, `less`, `more`
 - **Search**: `grep`, `find`, `rg`, `fd`
 - **Directory**: `ls`, `pwd`, `tree`
@@ -117,56 +111,32 @@ Interrupted plans are automatically resumed when you restart pi. If a plan was i
 - **Package info**: `npm list`, `npm outdated`, `yarn info`
 - **System info**: `uname`, `whoami`, `date`, `uptime`, `ps`
 
-### Blocked commands:
+### Blocked commands
+
 - **File modification**: `rm`, `mv`, `cp`, `mkdir`, `touch`, `chmod`, `chown`
 - **Git write**: `git add`, `git commit`, `git push`, `git reset`, `git checkout`
 - **Package install**: `npm install`, `yarn add`, `pip install`, `apt install`
 - **System**: `sudo`, `kill`, `reboot`, `shutdown`
 - **Editors**: `vim`, `nano`, `emacs`, `code`
 
-## Extension Compatibility
+## Configuration
 
-This extension filters tools by `sourceInfo.source` to distinguish builtins from extension-registered tools. **Extensions that rewrite builtin tools** (e.g., [pi-pretty](https://github.com/heyhuynhgiabuu/pi-pretty)) register replacements via `pi.registerTool()` with `source === "extension"`, which plan mode's allowlist does not recognize.
+### Keyboard shortcuts
 
-**Result:** Tools like `read`, `bash`, `ls`, `find`, `grep` disappear in plan mode when a rewriting extension is active.
+Override the default `Ctrl+Alt+P` in `~/.pi/agent/keybindings.json`:
 
-### Workaround
-
-Use pi-pretty's `PRETTY_DISABLE_TOOLS` env var to skip rewriting the tools plan mode manages:
-
-```bash
-PRETTY_DISABLE_TOOLS=read,bash,ls,find,grep pi
+```json
+{
+  "extensions.plan-mode-default.toggle": "ctrl+alt+m"
+}
 ```
 
-Or disable pi-pretty entirely when using plan mode:
+### CLI flags
 
-```bash
-# Unload pi-pretty temporarily
-pi --no-extension pi-pretty
-```
-
-### Why this happens
-
-Plan mode's `getPlanModeTools()` checks:
-
-```typescript
-if (t.sourceInfo.source === "builtin") return PLAN_SAFE_BUILTINS.has(t.name);
-return PLAN_SAFE_EXTENSION_TOOLS.has(t.name);
-```
-
-pi-pretty's tools have `source === "extension"`, so they fall into the extension path and get filtered out since `read`, `bash`, etc. aren't in `PLAN_SAFE_EXTENSION_TOOLS`.
-
-### For extension authors
-
-If your extension rewrites builtin tool names, either:
-- Use `PRETTY_DISABLE_TOOLS` equivalent to let users opt out
-- Or open an issue requesting name-based allowlisting
-
-## Acknowledgements
-
-This project is based on the [Plan Mode Extension](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples/extensions/plan-mode)
-from the [pi](https://github.com/earendil-works/pi) project by [Mario Zechner](https://github.com/badlogic) / Earendil Works.
-The original code is licensed under the MIT License.
+| Flag | Description |
+|------|-------------|
+| `--plan` | Start in plan mode (overrides default) |
+| `--exec` | Start in exec mode (overrides default) |
 
 ## License
 
